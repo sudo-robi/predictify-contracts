@@ -195,6 +195,8 @@ pub enum Error {
     DuplicateMarketId = 441,
     /// Override replay detected. Nonce has already been used.
     ReplayedOverride = 442,
+    /// Signer rotation cooldown has not yet expired.
+    SignerRotationCooldown = 443,
 
     // ===== CIRCUIT BREAKER ERRORS =====
     /// Circuit breaker has not been initialized. Initialize before use.
@@ -227,6 +229,12 @@ pub enum Error {
     /// The effective fee (in basis points) exceeds the maximum the caller is willing to accept.
     /// The bet is rejected to protect the caller from unexpected fee changes.
     FeeExceedsMax = 508,
+    /// The single-bet amount exceeds the per-market maximum bet cap.
+    ///
+    /// An admin can set a per-market cap via `set_market_max_bet_cap`. Once set,
+    /// any individual bet whose `amount` exceeds the cap will be rejected with this
+    /// error. Use `get_market_max_bet_cap` to query the current cap before placing.
+    BetExceedsCap = 509,
     /// No pending fee config commit was found for reveal or apply.
     NoPendingFeeCommit = 519,
     /// Fee config reveal was attempted too early (before timelock expiry).
@@ -241,10 +249,28 @@ pub enum Error {
     ExtensionCapExceeded = 524,
     /// The upgrade chain predecessor hash does not match the expected value.
     UpgradeChainMismatch = 525,
-    /// An admin override nonce was replayed; reject to prevent replay attacks.
-    ReplayedOverride = 526,
     /// Oracle quote is an outlier relative to the rolling median history.
     OracleQuoteOutlier = 527,
+    /// Force-resolve was replayed.
+    ForceResolveReplayed = 528,
+    /// Force-resolve reason is empty.
+    ForceResolveReasonEmpty = 529,
+    /// Arithmetic overflow occurred.
+    Overflow = 530,
+    /// Insufficient storage rent budget.
+    InsufficientStorageRent = 531,
+    /// User is not whitelisted.
+    UserNotWhitelisted = 532,
+    /// User is blacklisted.
+    UserBlacklisted = 533,
+    /// Invalid stake amount.
+    InvalidStakeAmount = 534,
+    /// Idempotent batch already applied.
+    IdempotentBatchAlreadyApplied = 535,
+    /// Creator is blacklisted.
+    CreatorBlacklisted = 536,
+    /// Global per-ledger bet cap has been exceeded to dampen flash-trading bursts.
+    PerLedgerBetCapExceeded = 528,
 }
 
 // ===== ERROR CATEGORIZATION AND RECOVERY SYSTEM =====
@@ -782,6 +808,7 @@ impl ErrorHandler {
             Error::AdminNotSet | Error::DisputeFeeFailed => RecoveryStrategy::ManualIntervention,
             Error::InvalidState | Error::InvalidOracleConfig => RecoveryStrategy::NoRecovery,
             Error::FeeExceedsMax => RecoveryStrategy::Retry,
+            Error::BetExceedsCap => RecoveryStrategy::NoRecovery,
             Error::OperationWouldExceedBudget => RecoveryStrategy::NoRecovery,
             _ => RecoveryStrategy::Abort,
         }
@@ -1364,6 +1391,11 @@ impl ErrorHandler {
                 ErrorCategory::Financial,
                 RecoveryStrategy::Retry,
             ),
+            Error::BetExceedsCap => (
+                ErrorSeverity::Low,
+                ErrorCategory::Financial,
+                RecoveryStrategy::NoRecovery,
+            ),
             Error::OperationWouldExceedBudget => (
                 ErrorSeverity::Critical,
                 ErrorCategory::System,
@@ -1507,6 +1539,7 @@ impl Error {
             Error::ExtensionDenied => "Market extension not allowed",
             Error::AdminNotSet => "Admin address not set",
             Error::FeeExceedsMax => "Fee is above the acceptable threshold",
+            Error::BetExceedsCap => "Bet amount exceeds the per-market maximum bet cap",
             Error::OracleStale => "Oracle data is stale",
             Error::OracleNoConsensus => "Oracle consensus not reached",
             Error::OracleVerified => "Oracle result already verified",
@@ -1563,6 +1596,7 @@ impl Error {
             Error::CumulativeExtensionCapHit => "Cumulative extension cap reached; no further extensions allowed",
             Error::IllegalMarketStateTransition => "Illegal market state transition attempted",
             Error::OracleQuoteOutlier => "Oracle quote is an outlier relative to the rolling median",
+            _ => "Unknown error",
         }
     }
 
@@ -1618,6 +1652,7 @@ impl Error {
             Error::ExtensionDenied => "EXTENSION_DENIED",
             Error::AdminNotSet => "ADMIN_NOT_SET",
             Error::FeeExceedsMax => "FEE_ABOVE_ACCEPTABLE",
+            Error::BetExceedsCap => "BET_EXCEEDS_CAP",
             Error::OracleStale => "ORACLE_STALE",
             Error::OracleNoConsensus => "ORACLE_NO_CONSENSUS",
             Error::OracleVerified => "ORACLE_VERIFIED",
@@ -1672,6 +1707,17 @@ impl Error {
             Error::CumulativeExtensionCapHit => "CUMULATIVE_EXTENSION_CAP_HIT",
             Error::IllegalMarketStateTransition => "ILLEGAL_MARKET_STATE_TRANSITION",
             Error::OracleQuoteOutlier => "ORACLE_QUOTE_OUTLIER",
+            Error::OperationWouldExceedBudget => "OPERATION_WOULD_EXCEED_BUDGET",
+            Error::ForceResolveAlreadyUsed => "FORCE_RESOLVE_ALREADY_USED",
+            Error::ForceResolveReplayed => "FORCE_RESOLVE_REPLAYED",
+            Error::ForceResolveReasonEmpty => "FORCE_RESOLVE_REASON_EMPTY",
+            Error::Overflow => "OVERFLOW",
+            Error::InsufficientStorageRent => "INSUFFICIENT_STORAGE_RENT",
+            Error::UserNotWhitelisted => "USER_NOT_WHITELISTED",
+            Error::UserBlacklisted => "USER_BLACKLISTED",
+            Error::InvalidStakeAmount => "INVALID_STAKE_AMOUNT",
+            Error::IdempotentBatchAlreadyApplied => "IDEMPOTENT_BATCH_ALREADY_APPLIED",
+            Error::CreatorBlacklisted => "CREATOR_BLACKLISTED",
         }
     }
 }

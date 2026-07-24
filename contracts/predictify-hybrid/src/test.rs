@@ -834,12 +834,12 @@ fn test_outcome_validation() {
 
 #[test]
 fn test_percentage_calculations() {
-    // Test percentage denominator
-    assert_eq!(crate::config::PERCENTAGE_DENOMINATOR, 100);
+    // Test percentage denominator (basis points: 10_000 = 100%)
+    assert_eq!(crate::config::PERCENTAGE_DENOMINATOR, 10_000);
 
-    // Test percentage calculation logic
+    // Test percentage calculation logic (2% = 200 basis points)
     let total = 1000_0000000; // 1000 XLM
-    let percentage = 2; // 2%
+    let percentage = 200; // 2% in basis points
     let result = (total * percentage) / crate::config::PERCENTAGE_DENOMINATOR;
     assert_eq!(result, 20_0000000); // 20 XLM
 }
@@ -3069,6 +3069,7 @@ fn test_bet_rate_limit_enforced_when_config_set() {
         bet_limit: 2,
         events_per_admin_limit: 10,
         time_window_seconds: 3600,
+        refill_mode: crate::rate_limiter::RefillMode::Linear,
     };
     test.env.mock_all_auths();
     client.set_rate_limits(&test.admin, &config);
@@ -3113,6 +3114,7 @@ fn test_bet_rate_limit_at_limit_ok() {
         bet_limit: 2,
         events_per_admin_limit: 10,
         time_window_seconds: 3600,
+        refill_mode: crate::rate_limiter::RefillMode::Linear,
     };
     test.env.mock_all_auths();
     client.set_rate_limits(&test.admin, &config);

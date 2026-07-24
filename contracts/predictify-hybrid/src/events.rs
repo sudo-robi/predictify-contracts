@@ -576,6 +576,18 @@ pub struct DisputeOpenedEvent {
     pub timestamp: u64,
 }
 
+/// Event emitted when suspected collusion is detected among disputers.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SuspectedCollusionFlagEvent {
+    pub market_id: Symbol,
+    pub user1: Address,
+    pub user2: Address,
+    pub stake_delta: i128,
+    pub time_delta: u64,
+    pub timestamp: u64,
+}
+
 /// Event emitted when a dispute is successfully resolved with final outcome and rewards.
 ///
 /// This event captures the complete dispute resolution process, including the final
@@ -2629,7 +2641,7 @@ impl EventEmitter {
             timestamp: env.ledger().timestamp(),
         };
 
-        Self::store_event(env, &symbol_short!("mkt_res"), &event);
+        env.storage().persistent().set(&symbol_short!("mkt_res"), &event);
         env.events().publish(
             (
                 symbol_short!("mkt_res"),
@@ -2684,6 +2696,29 @@ impl EventEmitter {
         Self::store_event(env, &schema.topic, &event);
         env.events()
             .publish((schema.topic, market_id.clone(), schema.schema_version), event);
+    }
+
+    /// Emit suspected collusion flag event.
+    pub fn emit_suspected_collusion_flag(
+        env: &Env,
+        market_id: &Symbol,
+        user1: &Address,
+        user2: &Address,
+        stake_delta: i128,
+        time_delta: u64,
+    ) {
+        let event = SuspectedCollusionFlagEvent {
+            market_id: market_id.clone(),
+            user1: user1.clone(),
+            user2: user2.clone(),
+            stake_delta,
+            time_delta,
+            timestamp: env.ledger().timestamp(),
+        };
+
+        Self::store_event(env, &symbol_short!("sus_col"), &event);
+        env.events()
+            .publish((symbol_short!("sus_col"), market_id.clone()), event);
     }
 
     /// Emit dispute resolved event
@@ -3091,6 +3126,16 @@ impl EventEmitter {
         Self::store_event(env, &symbol_short!("adm_deact"), &event);
         env.events()
             .publish((symbol_short!("adm_deact"), admin.clone()), event);
+    }
+
+    /// Emit signer rotation cooldown hit event
+    pub fn emit_signer_rotation_cooldown_hit(env: &Env, admin: &Address, last_rotation: u64, cooldown: u64) {
+        let topics = (Symbol::new(env, "Admin"), Symbol::new(env, "SignerRotationCooldownHit"));
+        let mut data = Map::new(env);
+        data.set(String::from_str(env, "admin"), admin.to_val());
+        data.set(String::from_str(env, "last_rotation"), last_rotation);
+        data.set(String::from_str(env, "cooldown"), cooldown);
+        env.events().publish(topics, data);
     }
 
     /// Emit market closed event
@@ -4015,6 +4060,35 @@ impl EventEmitter {
         env.events().publish(
             (symbol_short!("allowlst"), event_id.clone()),
             (addresses.clone(), admin.clone(), env.ledger().timestamp()),
+        );
+    }
+
+    /// Emit a monitor queue overflow event when the bounded queue evicts the oldest entry.
+    ///
+    /// This event signals that the queue was at capacity and a new event caused an
+    /// eviction. Off-chain indexers should consume this to track data loss and adjust
+    /// their polling cadence accordingly.
+    ///
+    /// # Arguments
+    ///
+    /// * `env` - The Soroban environment.
+    /// * `overflow_count` - Cumulative number of overflow evictions since initialization.
+    /// * `evicted_event_id` - The `event_id` of the evicted `MonitorEvent`, if available.
+    /// * `capacity` - The configured capacity of the bounded queue.
+    pub fn emit_monitor_queue_overflow(
+        env: &Env,
+        overflow_count: u64,
+        evicted_event_id: Option<Symbol>,
+        capacity: u32,
+    ) {
+        env.events().publish(
+            (symbol_short!("mon_ovf"),),
+            (
+                overflow_count,
+                evicted_event_id,
+                capacity,
+                env.ledger().timestamp(),
+            ),
         );
     }
 }
@@ -5119,7 +5193,7 @@ impl EventEmitter {
 #[cfg(test)]
 mod focused_dispute_tests {
     use super::*;
-    use soroban_sdk::{testutils::{Address as _, Events}, Address, Env, IntoVal, Symbol};
+    use soroban_sdk::{testutils::{Address as _, Events}, Address, Env, IntoVal, Symbol, TryIntoVal, Val};
 
     #[test]
     fn test_dispute_opened_event_topics() {
@@ -5142,14 +5216,20 @@ mod focused_dispute_tests {
         // topic2 = 1 (schema version)
 
         let mut found = false;
-        for event in events.iter() {
-            if event.2.len() == 3 {
-                let topic0: Symbol = event.2.get(0).unwrap().try_into_val(&env).unwrap();
-                let topic1: Symbol = event.2.get(1).unwrap().try_into_val(&env).unwrap();
+        // ContractEvents implements PartialEq with (Address, Vec<Val>, Val) tuples
+        // Use the `filter_by_contract` and check raw XDR for topic matching
+        let xdr_events = events.events();
+        for xdr_event in xdr_events.iter() {
+            if let soroban_sdk::xdr::ContractEventBody::V0(ref body) = xdr_event.body {
+                let topics: soroban_sdk::Vec<Val> = soroban_sdk::IntoVal::into_val(&body.topics, &env);
+                if topics.len() == 3 {
+                    let topic0: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+                    let topic1: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap();
 
-                if topic0 == symbol_short!("dispt_opn") {
-                    assert_eq!(topic1, market_id, "Market ID must be topic1");
-                    found = true;
+                    if topic0 == symbol_short!("dispt_opn") {
+                        assert_eq!(topic1, market_id, "Market ID must be topic1");
+                        found = true;
+                    }
                 }
             }
         }
